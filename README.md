@@ -1,176 +1,153 @@
-# CanadaPulse
+﻿# CanadaPulse
 
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+A local Canadian economic data platform with public-source ingestion, PostgreSQL analytics
+views, a read-only FastAPI backend, and an interactive dashboard.
 
-An automated Canadian economic and labour-market data platform that ingests public
-government data, validates and transforms it into analytical warehouse models, and exposes
-curated metrics through APIs and BI-ready datasets.
+## Run it
 
-## Current Status
+Use Python 3.11+ and Docker. Run these commands from the repository root:
 
-CanadaPulse is being built phase by phase. The repository currently contains the Phase 1
-foundation: Python package structure, local PostgreSQL infrastructure, metadata schema,
-configuration, structured logging, lint/test configuration, and starter documentation.
+```powershell
+# Only copy the example if you do not already have a .env file.
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+python -m pip install -r requirements.txt -r requirements-dev.txt
+docker compose up -d postgres
+python -m canadapulse.cli ingest
+python -m canadapulse.cli serve
+```
 
-No pipeline metrics or data record counts are claimed until ingestion runs successfully
-against real sources.
+Open **http://127.0.0.1:8000** for the dashboard or **http://127.0.0.1:8000/docs** for
+interactive API documentation. The server binds to localhost. Docker starts PostgreSQL;
+the Python server runs separately.
 
-## Why CanadaPulse?
+The first ingestion downloads the Statistics Canada full-table ZIP (about 60 MB at the
+initial verified run), streams its CSV, and loads selected observations. Allow several
+minutes for the initial load. Analytics only sees each source after its transaction commits.
 
-CanadaPulse is designed as a production-style portfolio project for data engineering,
-analytics engineering, BI, platform, and backend roles. It focuses on how public data moves
-from source systems into a reliable analytical warehouse, rather than on notebook-only
-analysis.
+## What is implemented
 
-## Architecture
+- Bank of Canada Valet ingestion for configured series `V39079` (target overnight rate).
+- Statistics Canada full-table `14100287` CSV ingestion, retaining monthly `Estimate`
+  observations, all available geographies, genders, ages, and adjustment categories.
+- Default coverage starts January 2015. Change it with `--start-date YYYY-MM-DD`.
+- Streaming CSV parsing, PostgreSQL COPY staging, and atomic upserts that apply revisions.
+- Source payloads, units, suppression flags, stable identities, timestamps, and run lineage.
+- Three download attempts with timeouts; per-source locks prevent overlapping imports.
+- Persistent run status, observed counts, duration, and errors.
+- Analytics views and filtered API endpoints for labour and interest-rate exploration.
+- Dashboard filters, time-series charts, observation table, CSV export, and run history.
 
 ```mermaid
 flowchart LR
-    statcan[Statistics Canada CSV/WDS] --> ingest[Python ingestion]
-    boc[Bank of Canada Valet API] --> ingest
-    ingest --> raw[(PostgreSQL raw)]
-    raw --> dbt[dbt transformations]
-    dbt --> marts[(analytics marts)]
-    marts --> api[FastAPI]
-    marts --> pbi[Power BI]
-    ingest --> meta[(metadata and quality)]
+    sources[Statistics Canada / Bank of Canada] --> python[Python ingestion]
+    python --> raw[(PostgreSQL raw)]
+    python --> metadata[(Run metadata)]
+    raw --> views[SQL analytics views]
+    views --> api[FastAPI]
+    api --> dashboard[Local dashboard]
+    views --> bi[Power BI / SQL clients]
 ```
 
-## Features
-
-- Local PostgreSQL service with dedicated `raw`, `staging`, `intermediate`, `analytics`,
-  and `metadata` schemas.
-- Metadata table for pipeline lifecycle, row counts, runtime, status, and errors.
-- Environment-driven settings with redacted CLI output.
-- Structured JSON logging for jobs and containers.
-- Raw table contracts for Statistics Canada labour-force observations and Bank of Canada
-  observations.
-- Pytest and ruff configuration for repeatable local quality checks.
-
-## Technology Stack
-
-- Python 3.11+
-- PostgreSQL 16
-- Docker Compose
-- pytest
-- ruff
-
-Planned phases add dbt, Apache Airflow, FastAPI, PySpark, and CI workflows.
-
-## Data Sources
-
-- Statistics Canada table `14-10-0287-03`, distributed as full-table CSV ZIP data.
-- Bank of Canada Valet API series `V39079`, target overnight rate observations.
-
-Source configuration lives in `config/datasets.yml` and `config/series.yml`.
-
-## Quick Start
+## Refresh data
 
 ```powershell
-Copy-Item .env.example .env
-python -m pip install -r requirements.txt -r requirements-dev.txt
-docker compose up -d postgres
-python -m canadapulse.cli status
-python -m pytest
+python -m canadapulse.cli ingest
+python -m canadapulse.cli ingest --source boc
+python -m canadapulse.cli ingest --source statcan --start-date 2020-01-01
+```
+
+Each normal run downloads fresh source data and reconciles revisions in the requested range.
+Earlier observations already loaded are retained. `--start-date` is a load boundary, not a
+request to delete older data. Statistics Canada monthly dates use the first day of the month.
+The raw table is a current-observation store, not a history of every source revision.
+
+For offline replay of an existing download:
+
+```powershell
+python -m canadapulse.cli ingest --reuse-cache
+```
+
+Caches live in ignored `data/cache/`; cache reuse is explicit and does not check freshness.
+No automatic scheduler is installed. To schedule refreshes, configure Windows Task Scheduler
+with your Python executable, arguments `-m canadapulse.cli ingest`, and **Start in** set to
+this repository directory. Airflow orchestration remains future work.
+
+## Database and API
+
+PostgreSQL uses host port `55432` by default. Settings come from process environment variables,
+then `.env`, then defaults. Keep `.env` private.
+
+| Object | Purpose |
+|---|---|
+| `raw.bank_of_canada_observations` | Daily rate observations, keyed by date and series |
+| `raw.statcan_labour_force` | Monthly observations with complete source dimensions |
+| `metadata.pipeline_runs` | Pipeline execution history |
+| `analytics.labour_market` | Dashboard labour observations with explicit dimensions |
+| `analytics.interest_rates` | Daily rate observations |
+
+`python -m canadapulse.cli init-db` applies repeatable additive SQL to an existing database.
+Ingestion runs this automatically; restarting a Docker volume is not required for migrations.
+
+| Route | Purpose |
+|---|---|
+| `/` | Interactive dashboard |
+| `/api/health` | Database connectivity |
+| `/api/filters` | Available labour dimensions and coverage |
+| `/api/labour` | One selected labour series with date filters and pagination |
+| `/api/rates` | Daily interest rates with date filters and pagination |
+| `/api/runs` | Latest 20 pipeline runs |
+| `/api/comparison` | Same-month labour comparison across geographies |
+
+The dashboard includes province comparisons (click a bar to switch geography), chart
+inspection on hover or touch, 1-year/5-year date shortcuts, month-over-month changes,
+searchable and paginated observations, date sorting, and CSV export. Filter selections
+are saved in the page URL, so a bookmarked view can be reopened. Additional gender,
+age, and seasonal-adjustment controls are under **More filters**. Changes to rate
+indicators are shown in percentage points; other changes retain source units.
+
+Labour requires an exact geography, indicator, gender, age group, and adjustment combination.
+Defaults select Canada's unemployment rate, total gender, ages 15+, seasonally adjusted.
+Some filter combinations have no source observations; the dashboard shows an empty state.
+API limits are at most 5,000 labour rows or 20,000 rate rows per request; use `offset` for
+additional pages. Queries use parameterized filters and read-only transactions.
+
+Values retain original source units: `Persons in thousands` must not be read as individual
+persons. Missing or suppressed observations remain null, never zero. The dashboard does not
+sum rates, mix adjustment types, or join daily rates to monthly labour dates.
+
+## Verification
+
+```powershell
+python -m pytest -q
 python -m ruff check .
+# Optional real PostgreSQL tests: creates and removes an isolated temporary test database.
+$env:CANADAPULSE_INTEGRATION = '1'
+python -m pytest tests/integration -q
 ```
 
-For systems with `make` available:
+Integration tests require database-creation privileges and verify reruns, source revisions,
+rollback on malformed observations, metadata, missing values, and API filtering. They do not
+modify project observations or require live source downloads.
 
-```bash
-make setup
-make up
-make status
-make test
-make lint
-```
+## Code map
 
-## Local Development
+- `src/canadapulse/cli.py`: ingestion, initialization, status, and server commands.
+- `src/canadapulse/ingestion/pipelines.py`: source retrieval, parsing, validation, COPY/upsert.
+- `src/canadapulse/database/`: connections, SQL execution, and run tracking.
+- `src/canadapulse/api/app.py`: read-only query endpoints.
+- `src/canadapulse/api/dashboard.html`: self-contained browser explorer, without a CDN.
+- `config/`: public dataset and series configuration.
+- `sql/init/`: raw contracts, operational schemas, and analytics views.
+- `tests/`: unit tests and optional isolated PostgreSQL integration test.
 
-The application reads `.env` automatically when present. Secrets and local credentials must
-stay out of Git; `.env` is ignored and `.env.example` contains only local dummy values.
-PostgreSQL is exposed on host port `55432` by default to avoid collisions with a native
-PostgreSQL install on `5432`.
+This is currently a repository-based editable-install application. dbt star schemas, Airflow,
+Spark, cloud deployment, and a Power BI report remain future extensions; their directories
+are placeholders. SQL views provide the current working analytics layer.
 
-Useful commands:
+## Sources
 
-```bash
-python -m canadapulse.cli config
-python -m canadapulse.cli status
-docker compose logs -f postgres
-docker compose down
-```
+- [Statistics Canada Web Data Service](https://www.statcan.gc.ca/en/developers/wds)
+- [Statistics Canada table 14-10-0287](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1410028701)
+- [Bank of Canada Valet API](https://www.bankofcanada.ca/valet/docs)
 
-## Data Model
-
-The first database migration creates the operational schemas. The second migration creates
-`metadata.pipeline_runs`. The third migration defines raw-source table contracts.
-
-The analytical warehouse models will be added in the dbt phase. See
-[`docs/data-model.md`](docs/data-model.md) for the current modelling contract and planned
-star schema.
-
-## Pipeline
-
-Python ingestion will write to `raw` and `metadata`. dbt will own staging, intermediate,
-and analytics transformations. Airflow will orchestrate reusable application functions
-rather than embedding business logic in DAG files.
-
-## API
-
-FastAPI will be added after ingestion and dbt models are runnable. Planned endpoints include
-health, province lookup, labour history, latest labour metrics, interest rates, and a
-dashboard summary.
-
-## Data Quality
-
-The metadata schema records pipeline status, observed row counts, rejected rows, errors, and
-runtime. Future phases will add source-specific validation checks and data-quality result
-tables.
-
-## Testing
-
-Current tests cover configuration loading, redaction, structured logging, CLI output, and
-metadata count validation. External HTTP calls and live database work are intentionally not
-required for unit tests.
-
-## Project Structure
-
-```text
-config/              Source configuration
-sql/init/            PostgreSQL initialization SQL
-src/canadapulse/     Application package
-tests/               Unit and integration tests
-docs/                Architecture and engineering documentation
-warehouse/           Planned dbt project
-airflow/             Planned Airflow DAGs
-spark/               Planned Spark jobs
-```
-
-## Roadmap
-
-1. Phase 2: Bank of Canada Valet ingestion with idempotent raw loading.
-2. Phase 3: Statistics Canada labour-force ingestion.
-3. Phase 4: dbt staging, dimensions, facts, marts, tests, and docs.
-4. Phase 5: Airflow orchestration.
-5. Phase 6: FastAPI service.
-6. Phase 7: data-quality observability.
-7. Phase 8: PySpark local and Databricks-ready processing.
-8. Phase 9: GitHub Actions CI.
-9. Phase 10: portfolio polish, screenshots, and dashboard guidance.
-
-## Engineering Decisions
-
-Initial decision records are in `docs/decisions/`.
-
-## Future Cloud Architecture
-
-The local-first design can later map to Azure Data Lake Storage Gen2, Databricks, Delta Lake,
-Azure Database for PostgreSQL or a warehouse, Key Vault, monitoring, and Power BI. The local
-setup does not require paid cloud infrastructure.
-
-## License
-
-MIT. See [`LICENSE`](LICENSE).
-
+MIT licensed. See LICENSE.

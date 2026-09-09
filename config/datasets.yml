@@ -1,0 +1,11 @@
+statcan:
+  labour_force:
+    enabled: true
+    table_id: "14-10-0287-03"
+    pid: "14100287"
+    language: "eng"
+    source_url: "https://www150.statcan.gc.ca/n1/en/tbl/csv/14100287-eng.zip"
+    destination_schema: "raw"
+    destination_table: "statcan_labour_force"
+    description: "Monthly labour-force characteristics by province."
+
