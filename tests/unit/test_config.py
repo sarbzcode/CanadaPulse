@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from canadapulse.config import DatabaseSettings, load_env_file, load_settings
 from canadapulse.exceptions import ConfigurationError
+
+
+@pytest.fixture(autouse=True)
+def isolated_configuration_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep fixture precedence independent of developer and CI database settings."""
+    for name in tuple(os.environ):
+        if name.startswith("CANADAPULSE_") or name in {
+            "DATABASE_URL", "ENVIRONMENT", "CORS_ORIGINS", "API_HOST", "API_PORT"
+        }:
+            monkeypatch.delenv(name)
 
 
 def test_database_settings_redacts_password() -> None:

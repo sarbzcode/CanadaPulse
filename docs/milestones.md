@@ -65,3 +65,11 @@
 - Current state: repository implementation ready; live public hosting and a real Power BI report remain external/optional deliverables. No fake URLs or PBIX files are included.
 - How to run: `docs/spark.md`, `docs/power-bi.md`, `docs/deployment.md`.
 - Next milestone: provision hosting, configure secrets/CORS, verify real public URLs, then observe scheduled refreshes.
+
+## GitHub verification follow-up
+
+The first uploaded commit passed dbt and frontend CI. Python CI exposed an existing dotenv
+test's dependence on ambient database variables. Configuration tests now clear inherited
+application variables within a scoped pytest fixture; production configuration precedence is
+unchanged. Reproduced locally with process-level database settings: 26 tests passed and Ruff
+passed. Follow the README workflow badges for the latest remote result.
