@@ -18,7 +18,16 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        for attr in ("pipeline_run_id", "source_name", "table_name"):
+        for attr in (
+            "pipeline_run_id",
+            "source_name",
+            "table_name",
+            "records_loaded",
+            "records_inserted",
+            "records_updated",
+            "records_unchanged",
+            "bytes_downloaded",
+        ):
             value = getattr(record, attr, None)
             if value is not None:
                 payload[attr] = value
@@ -47,4 +56,3 @@ def get_logger(name: str) -> logging.Logger:
     """Return a named logger."""
 
     return logging.getLogger(name)
-

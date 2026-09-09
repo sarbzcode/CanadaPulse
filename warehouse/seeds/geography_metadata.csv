@@ -1,0 +1,15 @@
+geography_name,geography_type,province_code,region,country
+Canada,country,CA,Canada,Canada
+Newfoundland and Labrador,province,NL,Atlantic,Canada
+Prince Edward Island,province,PE,Atlantic,Canada
+Nova Scotia,province,NS,Atlantic,Canada
+New Brunswick,province,NB,Atlantic,Canada
+Quebec,province,QC,Central,Canada
+Ontario,province,ON,Central,Canada
+Manitoba,province,MB,Prairies,Canada
+Saskatchewan,province,SK,Prairies,Canada
+Alberta,province,AB,Prairies,Canada
+British Columbia,province,BC,Pacific,Canada
+Yukon,territory,YT,Northern,Canada
+Northwest Territories,territory,NT,Northern,Canada
+Nunavut,territory,NU,Northern,Canada

@@ -32,7 +32,7 @@ def connect(settings: DatabaseSettings) -> Any:
     try:
         return psycopg.connect(**settings.as_connection_kwargs())
     except Exception as exc:
-        raise DatabaseConnectionError(f"Unable to connect to PostgreSQL: {exc}") from exc
+        raise DatabaseConnectionError("Unable to connect to PostgreSQL.") from exc
 
 
 def check_database(settings: DatabaseSettings) -> DatabaseHealth:

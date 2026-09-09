@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+.venv
+tmp
+data
+**/__pycache__
+**/node_modules
+**/.next
+warehouse/target
+warehouse/logs
+.pytest_cache
+.ruff_cache

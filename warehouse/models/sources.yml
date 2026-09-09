@@ -1,0 +1,35 @@
+version: 2
+sources:
+  - name: raw
+    schema: "{{ env_var('DBT_RAW_SCHEMA', 'raw') }}"
+    description: Validated source-aligned PostgreSQL observations written atomically by Python.
+    tables:
+      - name: statcan_labour_force
+        description: Monthly Estimate observations from full Statistics Canada table 14100287, with all loaded demographics and adjustments.
+        config:
+          loaded_at_field: loaded_at
+          freshness:
+            warn_after: {count: 8, period: day}
+            error_after: {count: 15, period: day}
+        columns:
+          - name: source_row_hash
+            description: SHA-256 of full-table PID, reference period, vector and coordinate; excludes revisable values.
+            data_tests: [not_null, unique]
+          - name: pipeline_run_id
+            description: UUID identifying the last successful source upsert.
+          - name: loaded_at
+            description: Time of last successful ingestion, distinct from reference_date. Freshness measures extraction recency.
+      - name: bank_of_canada_observations
+        description: Business-daily Valet observations; unique by date and series.
+        config:
+          loaded_at_field: loaded_at
+          freshness:
+            warn_after: {count: 4, period: day}
+            error_after: {count: 8, period: day}
+        columns:
+          - name: observation_date
+            description: Source business date of the rate observation.
+            data_tests: [not_null]
+          - name: series_code
+            description: Official Valet series identifier.
+            data_tests: [not_null]

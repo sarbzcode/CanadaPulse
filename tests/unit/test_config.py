@@ -67,3 +67,29 @@ def test_invalid_dotenv_line_raises_configuration_error(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="Invalid dotenv entry"):
         load_env_file(env_file)
 
+
+def test_database_url_decodes_credentials_and_requires_tls(monkeypatch):
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql://reader:p%40ss@db.example.org/platform?sslmode=require"
+    )
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    settings = load_settings(None)
+    assert settings.database.password == "p@ss"
+    assert settings.database.host == "db.example.org"
+    assert settings.database.port == 5432
+    assert settings.database.sslmode == "require"
+    assert "p@ss" not in str(settings.redacted())
+
+
+def test_bad_url_does_not_disclose_secret(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "https://private-secret")
+    with pytest.raises(ConfigurationError) as error:
+        load_settings(None)
+    assert "private-secret" not in str(error.value)
+
+
+def test_production_rejects_wildcard_cors(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("CORS_ORIGINS", "*")
+    with pytest.raises(ConfigurationError, match="CORS"):
+        load_settings(None)

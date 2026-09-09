@@ -1,4 +1,19 @@
 services:
+  api:
+    profiles: [app]
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      CANADAPULSE_DB_HOST: postgres
+      CANADAPULSE_DB_PORT: "5432"
+      CANADAPULSE_DB_NAME: ${POSTGRES_DB:-canadapulse}
+      CANADAPULSE_DB_USER: ${POSTGRES_USER:-canadapulse}
+      CANADAPULSE_DB_PASSWORD: ${POSTGRES_PASSWORD:-canadapulse_local_password}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
   postgres:
     image: postgres:16
     container_name: canadapulse-postgres

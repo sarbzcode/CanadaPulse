@@ -1,8 +1,9 @@
 ﻿# Pipeline behavior
 
 The implemented flow is download -> validate -> temporary COPY table -> upsert raw
-observations -> finalize run metadata. SQL analytics views expose committed observations.
-Run `python -m canadapulse.cli ingest` from the repository root.
+observations -> finalize source run metadata -> dbt build and tests -> curated analytics -> API.
+Run `python -m canadapulse.cli refresh` from the repository root for the complete flow.
+`ingest` still runs only source ingestion; `warehouse` rebuilds and tests the warehouse separately.
 
 Downloads retry up to three times and use a 120-second socket timeout. A temporary `.part`
 file is renamed only after the transfer succeeds. Use `--reuse-cache` only for deliberate
@@ -36,5 +37,19 @@ The default start is 2015-01-01. Extending history uses `--start-date`; narrowin
 not remove previously loaded data. Ingestion currently supports one enabled BoC series, as
 configured in the repository, and the Statistics Canada labour dataset.
 
-The local dashboard and API are implemented. dbt and Airflow remain future extensions. For
-scheduling instructions and the API routes, see ../README.md.
+Each successful source run records inserted, updated and unchanged observations separately.
+Unchanged means the existing source payload matched; it is not a claim about rows skipped by
+PostgreSQL. Five quality results record selected-row presence, key uniqueness, load reconciliation,
+missing-value rate and reference-period coverage. Null labour values are retained rather than
+converted to zero. A failed source transaction rolls back its quality results with its data.
+
+The warehouse preserves source lineage through staging, intermediate models and dimensional facts.
+Its tracked run stores actual dbt test results and the combined fact-row count. An advisory lock
+serializes warehouse refreshes. dbt replaces each table atomically, but publication across all models
+is not a single transaction: concurrent readers can briefly observe models from different refreshes.
+A failed test marks the warehouse run failed; it does not roll back models already built.
+
+The versioned API and Next.js website query curated models. The original local explorer and its
+legacy routes remain available. Public status reports actual run metadata and freshness, excluding
+internal exception details. See [warehouse](warehouse.md), [orchestration](orchestration.md), and
+[deployment](deployment.md) for dbt, scheduler and hosting instructions.

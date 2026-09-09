@@ -27,6 +27,7 @@ from canadapulse.database.metadata import (
     PipelineRunRepository,
     PipelineRunStatus,
 )
+from canadapulse.validation.quality import LoadMetrics, record_load_quality
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[3]
@@ -52,6 +53,9 @@ def download(url: str, target: Path, reuse_cache: bool = False) -> Path:
             ):
                 shutil.copyfileobj(response, output)
             temporary.replace(target)
+            logger.info(
+                "Downloaded source dataset", extra={"bytes_downloaded": target.stat().st_size}
+            )
             return target
         except (urllib.error.URLError, TimeoutError, OSError):
             temporary.unlink(missing_ok=True)
@@ -141,7 +145,7 @@ BOC_COLUMNS = [
 ]
 
 
-def merge_rows(connection, table, columns, keys, rows):
+def merge_rows(connection, table, columns, keys, rows) -> LoadMetrics:
     """COPY into temporary storage, then merge in the caller's transaction."""
     names = sql.SQL(", ").join(map(sql.Identifier, columns))
     with connection.cursor() as cursor:
@@ -157,6 +161,26 @@ def merge_rows(connection, table, columns, keys, rows):
                 count += 1
         if not count:
             raise ValueError("Source returned no observations within the requested scope")
+        date_column = "reference_date" if table == "statcan_labour_force" else "observation_date"
+        join = sql.SQL(" AND ").join(
+            sql.SQL("i.{} = r.{}").format(sql.Identifier(key), sql.Identifier(key)) for key in keys
+        )
+        cursor.execute(
+            sql.SQL(
+                "SELECT count(*) FILTER (WHERE r.raw_id IS NULL), "
+                "count(*) FILTER (WHERE r.raw_id IS NOT NULL AND i.raw_payload IS DISTINCT FROM "
+                "r.raw_payload), count(*) FILTER (WHERE r.raw_id IS NOT NULL AND "
+                "i.raw_payload IS NOT DISTINCT FROM r.raw_payload), "
+                "count(*) FILTER (WHERE i.value IS NULL), min(i.{}), max(i.{}) "
+                "FROM incoming i LEFT JOIN raw.{} r ON {}"
+            ).format(
+                sql.Identifier(date_column),
+                sql.Identifier(date_column),
+                sql.Identifier(table),
+                join,
+            )
+        )
+        measured = cursor.fetchone()
         updates = sql.SQL(", ").join(
             sql.SQL("{} = EXCLUDED.{}").format(sql.Identifier(c), sql.Identifier(c))
             for c in columns
@@ -174,7 +198,7 @@ def merge_rows(connection, table, columns, keys, rows):
                 updates,
             )
         )
-    return count
+    return LoadMetrics(count, *measured)
 
 
 def run_source(settings, source: str, start: date, reuse_cache: bool = False):
@@ -184,6 +208,10 @@ def run_source(settings, source: str, start: date, reuse_cache: bool = False):
         extracted = 0
         rejected = 0
         try:
+            logger.info(
+                "Starting source ingestion",
+                extra={"source_name": source, "pipeline_run_id": str(run_id)},
+            )
             # A session lock avoids overlapping runs for the same source.
             data.execute("SELECT pg_advisory_lock(hashtext(%s))", (f"canadapulse:{source}",))
             cache = ROOT / "data/cache"
@@ -275,14 +303,30 @@ def run_source(settings, source: str, start: date, reuse_cache: bool = False):
             else:
                 raise ValueError(f"Unknown source: {source}")
             # Finalize metadata in the same transaction as the observations.
+            record_load_quality(data, run_id, source, loaded)
             PipelineRunRepository(data).complete_run(
                 run_id,
-                counts=PipelineRunCounts(extracted, loaded, rejected),
+                counts=PipelineRunCounts(extracted, loaded.loaded, rejected),
             )
             logger.info(
-                "Ingestion complete", extra={"pipeline_run_id": str(run_id), "source_name": source}
+                "Ingestion complete",
+                extra={
+                    "pipeline_run_id": str(run_id),
+                    "source_name": source,
+                    "records_loaded": loaded.loaded,
+                    "records_inserted": loaded.inserted,
+                    "records_updated": loaded.updated,
+                    "records_unchanged": loaded.unchanged,
+                },
             )
-            return {"source": source, "run_id": str(run_id), "rows_loaded": loaded}
+            return {
+                "source": source,
+                "run_id": str(run_id),
+                "rows_loaded": loaded.loaded,
+                "inserted": loaded.inserted,
+                "revised": loaded.updated,
+                "unchanged": loaded.unchanged,
+            }
         except Exception as exc:
             data.rollback()
             repository.complete_run(

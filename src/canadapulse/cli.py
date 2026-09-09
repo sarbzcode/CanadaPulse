@@ -21,12 +21,16 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser("config", help="Print redacted runtime configuration.")
     subcommands.add_parser("status", help="Check application and PostgreSQL connectivity.")
     subcommands.add_parser("init-db", help="Apply database schemas and analytics views.")
+    subcommands.add_parser("warehouse", help="Build/test dbt and record quality results.")
+    refresh = subcommands.add_parser("refresh", help="Ingest both sources and build/test dbt.")
+    refresh.add_argument("--reuse-cache", action="store_true")
     ingest = subcommands.add_parser("ingest", help="Download and load official observations.")
     ingest.add_argument("--source", choices=["all", "boc", "statcan"], default="all")
     ingest.add_argument("--start-date", type=date.fromisoformat, default=date(2015, 1, 1))
     ingest.add_argument("--reuse-cache", action="store_true")
     serve = subcommands.add_parser("serve", help="Start the local dashboard and read-only API.")
-    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--port", type=int)
+    serve.add_argument("--host")
     return parser
 
 
@@ -38,6 +42,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     settings = load_settings()
     configure_logging(settings.log_level)
+
+    if args.command in {"warehouse", "refresh"}:
+        from canadapulse.ingestion.pipelines import initialize, run_source
+        from canadapulse.services.warehouse_service import refresh_warehouse
+
+        initialize(settings)
+        if args.command == "refresh":
+            for source in ("boc", "statcan"):
+                run_source(settings, source, date(2015, 1, 1), args.reuse_cache)
+        print(json.dumps(refresh_warehouse(settings), default=str))
+        return 0
 
     if args.command in {"init-db", "ingest"}:
         from canadapulse.ingestion.pipelines import initialize, run_source
@@ -56,7 +71,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "serve":
         import uvicorn
 
-        uvicorn.run("canadapulse.api.app:app", host="127.0.0.1", port=args.port)
+        uvicorn.run(
+            "canadapulse.api.app:app",
+            host=args.host or settings.api_host,
+            port=args.port or settings.api_port,
+        )
         return 0
 
     if args.command == "config":

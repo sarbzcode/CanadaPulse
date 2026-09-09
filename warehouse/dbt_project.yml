@@ -1,0 +1,28 @@
+name: canadapulse
+version: '1.0.0'
+config-version: 2
+profile: canadapulse
+model-paths: [models]
+seed-paths: [seeds]
+test-paths: [tests]
+macro-paths: [macros]
+clean-targets: [target, dbt_packages]
+models:
+  canadapulse:
+    staging:
+      +schema: staging
+      +materialized: view
+    intermediate:
+      +schema: intermediate
+      +materialized: view
+    marts:
+      +materialized: table
+      dimensions:
+        +schema: warehouse
+      facts:
+        +schema: warehouse
+      analytics:
+        +schema: analytics
+seeds:
+  canadapulse:
+    +schema: staging

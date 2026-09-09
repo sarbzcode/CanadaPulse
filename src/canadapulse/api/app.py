@@ -4,22 +4,48 @@ from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from psycopg import Error as PsycopgError
 from psycopg.rows import dict_row
 
+from canadapulse.api.v1 import create_router
 from canadapulse.config import load_settings
 from canadapulse.database.connection import connect
+from canadapulse.exceptions import DatabaseConnectionError
 
-app = FastAPI(title="CanadaPulse", version="0.1.0")
+app = FastAPI(
+    title="CanadaPulse",
+    version="0.2.0",
+    description=(
+        "Canadian Economic & Labour Market Intelligence. Versioned endpoints serve dbt marts; "
+        "Legacy routes preserve the local explorer. Independent portfolio project; "
+        "not a government service."
+    ),
+)
 
 
 def query(statement, parameters=()):
-    with connect(load_settings().database) as connection:
-        connection.execute("SET TRANSACTION READ ONLY")
-        connection.execute("SET LOCAL statement_timeout = '15s'")
-        with connection.cursor(row_factory=dict_row) as cursor:
-            cursor.execute(statement, parameters)
-            return cursor.fetchall()
+    try:
+        with connect(load_settings().database) as connection:
+            connection.execute("SET TRANSACTION READ ONLY")
+            connection.execute("SET LOCAL statement_timeout = '15s'")
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(statement, parameters)
+                return cursor.fetchall()
+    except (DatabaseConnectionError, PsycopgError):
+        raise HTTPException(
+            503, "Data is temporarily unavailable. Please try again later."
+        ) from None
+
+
+app.include_router(create_router(query))
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(load_settings().cors_origins),
+    allow_methods=["GET"],
+    allow_headers=["Accept", "Content-Type"],
+)
 
 
 @app.get("/", response_class=HTMLResponse)

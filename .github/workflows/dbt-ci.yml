@@ -1,0 +1,49 @@
+﻿name: dbt CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  warehouse:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: canadapulse
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: canadapulse_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U canadapulse"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      CANADAPULSE_DB_HOST: localhost
+      CANADAPULSE_DB_PORT: '5432'
+      CANADAPULSE_DB_NAME: canadapulse_ci
+      CANADAPULSE_DB_USER: canadapulse
+      CANADAPULSE_DB_PASSWORD: ci_password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -e '.[dev,warehouse]'
+      - run: python scripts/load_ci_fixtures.py
+      - run: python -m canadapulse.services.warehouse_service deps
+      - run: python -m canadapulse.services.warehouse_service compile
+      - run: python -m canadapulse.services.warehouse_service seed
+      - run: python -m canadapulse.services.warehouse_service run
+      - run: python -m canadapulse.services.warehouse_service test
+      - run: python scripts/verify_ci_warehouse.py
+      - run: python -m canadapulse.services.warehouse_service docs generate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dbt-ci-results
+          path: |
+            warehouse/target/run_results.json
+            warehouse/target/manifest.json
+            warehouse/target/catalog.json

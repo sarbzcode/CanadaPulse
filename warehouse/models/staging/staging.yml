@@ -1,0 +1,40 @@
+version: 2
+models:
+- name: stg_statcan_labour
+  description: Trimmed source labels and typed monthly observations. No demographic
+    filtering or value imputation.
+  columns:
+  - name: observation_key
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+  - name: reference_date
+    description: First day of the source reference month.
+    data_tests:
+    - not_null
+  - name: gender
+    description: Source gender label; Men+ and Women+ are preserved.
+    data_tests:
+    - not_null
+  - name: adjustment
+    description: Source seasonal adjustment category.
+    data_tests:
+    - not_null
+  - name: pipeline_run_id
+    description: Ingestion execution lineage.
+    data_tests:
+    - not_null
+- name: stg_boc_interest_rates
+  description: Normalized daily Valet series with original lineage.
+  columns:
+  - name: observation_key
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+  - name: rate
+    description: Policy rate in percent; negative monetary rates are not globally
+      forbidden.
+    data_tests:
+    - not_null

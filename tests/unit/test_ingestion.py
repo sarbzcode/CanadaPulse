@@ -6,6 +6,42 @@ import pytest
 from canadapulse.ingestion.pipelines import LABOUR_COLUMNS, labour_row, number
 
 
+def test_download_retries_and_replaces_partial_files(tmp_path, monkeypatch):
+    import io
+    from urllib.error import URLError
+
+    from canadapulse.ingestion import pipelines
+
+    attempts = []
+
+    def response(*args, **kwargs):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise URLError("Temporary network failure")
+        return io.BytesIO(b"official-fixture")
+
+    monkeypatch.setattr(pipelines.urllib.request, "urlopen", response)
+    monkeypatch.setattr(pipelines.time, "sleep", lambda _: None)
+    target = tmp_path / "source.json"
+    pipelines.download("https://example.invalid/source", target)
+    assert len(attempts) == 3
+    assert target.read_bytes() == b"official-fixture"
+    assert not target.with_suffix(".json.part").exists()
+
+
+def test_cache_replay_avoids_http(tmp_path, monkeypatch):
+    from canadapulse.ingestion import pipelines
+
+    target = tmp_path / "source.json"
+    target.write_bytes(b"cached")
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Offline replay must not issue HTTP")
+
+    monkeypatch.setattr(pipelines.urllib.request, "urlopen", unexpected)
+    assert pipelines.download("https://example.invalid", target, True) == target
+
+
 def observation(value="6.5"):
     return {
         "REF_DATE": "2025-01",

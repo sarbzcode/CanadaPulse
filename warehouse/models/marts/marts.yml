@@ -1,0 +1,188 @@
+version: 2
+models:
+- name: dim_date
+  description: Continuous daily calendar covering loaded observations. YYYYMMDD integer
+    keys are deterministic.
+  columns:
+  - name: date_key
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+  - name: date
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+- name: dim_geography
+  description: Only observed geographies; seed enriches province codes and regions.
+    Territories appear only if observed.
+  columns:
+  - name: geography_key
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+  - name: geography_name
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+  - name: geography_type
+    description: Country, province or territory.
+    data_tests:
+    - not_null
+    - accepted_values:
+        arguments:
+          values:
+          - country
+          - province
+          - territory
+- name: dim_indicator
+  description: One indicator per name, source unit and scalar factor. Hash uses a
+    JSON array to preserve field boundaries.
+  columns:
+  - name: indicator_key
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+  - name: unit
+    description: Published unit; not interchangeable with base units.
+    data_tests:
+    - not_null
+- name: dim_series
+  description: One official Bank of Canada series.
+  columns:
+  - name: series_key
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+  - name: series_code
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+- name: fact_labour_market
+  description: 'Grain: full-table PID x reference month x vector x coordinate. Verified
+    business grain adds geography, indicator/unit/scale, gender, age, adjustment and
+    statistical measure. Missing values remain null; revision upserts preserve identity.'
+  columns:
+  - name: observation_key
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+  - name: date_key
+    description: Foreign key into dim_date.
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_date')
+          field: date_key
+  - name: geography_key
+    description: Foreign key into dim_geography.
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_geography')
+          field: geography_key
+  - name: indicator_key
+    description: Foreign key into dim_indicator.
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_indicator')
+          field: indicator_key
+  - name: value
+    description: Source-unit observation; may be null for missing or suppressed values.
+  - name: pipeline_run_id
+    description: Last ingestion run for this observation.
+    data_tests:
+    - not_null
+- name: fact_interest_rates
+  description: One observation per date x official series. Daily rates are never summed.
+  columns:
+  - name: observation_key
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+  - name: date_key
+    description: Foreign key into dim_date.
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_date')
+          field: date_key
+  - name: series_key
+    description: Foreign key into dim_series.
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_series')
+          field: series_key
+- name: labour_observations
+  description: Indexed, denormalized fact/dimension join for the full-demographic
+    data explorer.
+  columns:
+  - name: observation_key
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+- name: interest_rate_history
+  description: Daily rate mart for API history, sourced from dimensional facts.
+  columns:
+  - name: date
+    description: Actual observed business date.
+    data_tests:
+    - not_null
+- name: province_labour_summary
+  description: One month x geography for total gender, ages 15+, seasonally adjusted.
+    Employment counts are persons. Change calculations require exact calendar matches;
+    rates use percentage points.
+  columns:
+  - name: reference_date
+    description: Monthly first-day date.
+    data_tests:
+    - not_null
+  - name: employment
+    description: Persons, converted from published thousands.
+  - name: yoy_employment_change_pct
+    description: Year-over-year percent change; null if denominator missing or zero.
+- name: canada_labour_trends
+  description: Canada-only monthly headline measures; excludes provincial totals to
+    prevent double counting.
+  columns:
+  - name: reference_date
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+- name: province_comparison
+  description: Province/territory headline observations by month with identical demographic
+    scope.
+  columns:
+  - name: geography
+    description: Observed province or territory.
+    data_tests:
+    - not_null
+- name: economic_dashboard
+  description: Canada monthly labour joined to last observed overnight rate within
+    that same month. Partial months are flagged. Alignment describes trends and does
+    not imply causation.
+  columns:
+  - name: reference_date
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+  - name: rate_observation_date
+    description: Actual rate date used, retained to show alignment and missing coverage.

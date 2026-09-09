@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from os import environ
 from pathlib import Path
 
@@ -21,9 +21,10 @@ class DatabaseSettings:
     port: int
     database: str
     user: str
-    password: str | None
+    password: str | None = field(repr=False)
     sslmode: str
     connect_timeout_seconds: int
+    connection_options: dict[str, str] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         if not self.host:
@@ -53,6 +54,7 @@ class DatabaseSettings:
         }
         if self.password:
             kwargs["password"] = self.password
+        kwargs.update(self.connection_options)
         return kwargs
 
     def redacted(self) -> dict[str, object]:
@@ -77,6 +79,9 @@ class AppSettings:
     log_level: str
     service_version: str
     database: DatabaseSettings
+    cors_origins: tuple[str, ...] = ("http://localhost:3000", "http://127.0.0.1:3000")
+    api_host: str = "127.0.0.1"
+    api_port: int = 8000
 
     def __post_init__(self) -> None:
         if not self.environment:
@@ -86,6 +91,13 @@ class AppSettings:
             raise ConfigurationError(f"CANADAPULSE_LOG_LEVEL must be one of: {allowed}.")
         if not self.service_version:
             raise ConfigurationError("CANADAPULSE_SERVICE_VERSION must not be empty.")
+        if not 1 <= self.api_port <= 65535:
+            raise ConfigurationError("API_PORT must be between 1 and 65535.")
+        if self.environment == "production":
+            if "*" in self.cors_origins:
+                raise ConfigurationError("Production CORS origins must be explicit.")
+            if self.database.sslmode not in {"require", "verify-ca", "verify-full"}:
+                raise ConfigurationError("Production database connections must require SSL.")
 
     def redacted(self) -> dict[str, object]:
         """Return settings safe to display."""
@@ -123,6 +135,9 @@ def load_settings(env_file: Path | None = DEFAULT_ENV_FILE) -> AppSettings:
     """Load and validate CanadaPulse settings."""
 
     file_env = load_env_file(env_file) if env_file is not None else {}
+    environment = _get_optional_env("ENVIRONMENT", file_env=file_env) or _get_env(
+        "CANADAPULSE_ENV", default="local", file_env=file_env
+    )
 
     database = DatabaseSettings(
         host=_get_env("CANADAPULSE_DB_HOST", default="localhost", file_env=file_env),
@@ -137,8 +152,31 @@ def load_settings(env_file: Path | None = DEFAULT_ENV_FILE) -> AppSettings:
             file_env=file_env,
         ),
     )
+    database_url = _get_optional_env("DATABASE_URL", file_env=file_env)
+    if database_url:
+        from psycopg.conninfo import conninfo_to_dict
+
+        try:
+            if not database_url.startswith(("postgresql://", "postgres://")):
+                raise ValueError("Unsupported connection scheme")
+            parsed = conninfo_to_dict(database_url)
+            database = replace(
+                database,
+                host=parsed.pop("host", "localhost"),
+                port=int(parsed.pop("port", "5432")),
+                database=parsed.pop("dbname", ""),
+                user=parsed.pop("user", ""),
+                password=parsed.pop("password", None),
+                sslmode=parsed.pop("sslmode", "require"),
+                connect_timeout_seconds=int(parsed.pop("connect_timeout", "10")),
+                connection_options=parsed,
+            )
+        except Exception:
+            raise ConfigurationError(
+                "DATABASE_URL must be a valid PostgreSQL connection URL."
+            ) from None
     return AppSettings(
-        environment=_get_env("CANADAPULSE_ENV", default="local", file_env=file_env),
+        environment=environment,
         log_level=_get_env("CANADAPULSE_LOG_LEVEL", default="INFO", file_env=file_env).upper(),
         service_version=_get_env(
             "CANADAPULSE_SERVICE_VERSION",
@@ -146,6 +184,17 @@ def load_settings(env_file: Path | None = DEFAULT_ENV_FILE) -> AppSettings:
             file_env=file_env,
         ),
         database=database,
+        cors_origins=tuple(
+            origin.strip()
+            for origin in _get_env(
+                "CORS_ORIGINS",
+                default="http://localhost:3000,http://127.0.0.1:3000",
+                file_env=file_env,
+            ).split(",")
+            if origin.strip()
+        ),
+        api_host=_get_env("API_HOST", default="127.0.0.1", file_env=file_env),
+        api_port=_get_int_env("API_PORT", default=8000, file_env=file_env),
     )
 
 

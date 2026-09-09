@@ -1,0 +1,36 @@
+﻿name: Refresh production data
+on:
+  schedule:
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Source to refresh before rebuilding the warehouse
+        type: choice
+        options: [all, boc, statcan]
+        default: all
+permissions:
+  contents: read
+concurrency:
+  group: production-data-refresh
+  cancel-in-progress: false
+jobs:
+  refresh:
+    if: vars.ENABLE_PRODUCTION_REFRESH == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ENVIRONMENT: production
+      CORS_ORIGINS: https://example.invalid
+      REQUESTED_SOURCE: ${{ inputs.source }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -e '.[warehouse]'
+      - name: Download, validate, load and build tested marts
+        run: python scripts/refresh_scheduled.py

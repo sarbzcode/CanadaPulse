@@ -1,0 +1,28 @@
+version: 2
+models:
+- name: int_labour_observations
+  description: Estimate observations with deterministic dimension keys. Thousands
+    are converted to persons in value_base_units; original value remains unchanged.
+  columns:
+  - name: observation_key
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique
+  - name: scalar_factor
+    description: Only supported scale factors are converted.
+    data_tests:
+    - not_null
+    - accepted_values:
+        arguments:
+          values:
+          - units
+          - thousands
+- name: int_interest_rate_observations
+  description: Daily series identities and integer date keys; no forward filling.
+  columns:
+  - name: observation_key
+    description: Deterministic identity, stable across source revisions.
+    data_tests:
+    - not_null
+    - unique

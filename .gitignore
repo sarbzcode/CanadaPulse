@@ -30,3 +30,12 @@ warehouse/logs/
 Thumbs.db
 .idea/
 .vscode/
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+warehouse/profiles.local.yml
+warehouse/.user.yml
+airflow/logs/
+spark/output/
