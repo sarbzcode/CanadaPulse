@@ -52,6 +52,31 @@ server-reachable API origin for server rendering. These values are public origin
 credentials. Install/build commands are `npm ci` and `npm run build`. Redeploy after changing
 NEXT_PUBLIC_API_URL because Next.js embeds it in browser assets.
 
+The checked-in `frontend/vercel.json` explicitly selects Next.js and its `.next` build output.
+Keep the Vercel project's Root Directory set to `frontend` so this configuration is read.
+If an earlier deployment reports `No Output Directory named "public" found`, remove the
+`public` Output Directory override in Vercel settings and redeploy the latest commit.
+Do not create an empty `public` directory to work around this error.
+
+### Render starts but health checks return 503
+
+A successful Docker build and `Application startup complete` mean the server started;
+they do not confirm database connectivity or warehouse initialization. The `/health`
+endpoint queries PostgreSQL and the metadata tables. Diagnose using the public endpoints:
+
+- `/api/health` returns 503: check Render's `DATABASE_URL`, database availability, and SSL.
+  Paste the raw connection string without Markdown backslashes or surrounding quotes.
+- `/api/health` returns 200 but `/health` returns 503: check that the metadata tables
+  have been initialized and that the API database role can read them.
+- Both return 200 but dashboard requests fail: check the dbt build and reader permissions
+  on the serving tables. A degraded health response can also mean data is not loaded or stale.
+
+For a new hosted database, run the initialization and full refresh from section 1 using
+its private direct writer connection, then redeploy the API if its settings changed.
+The local Docker database is separate from the hosted database. Keep `/health` as the
+Render health check; changing it to a static route would hide the database failure.
+An initial `HEAD /` response of 405 is separate from the failing `/health` checks.
+
 After Vercel assigns the real website domain, add its exact origin to the API's CORS_ORIGINS.
 Preview deployments require explicit allowed origins; do not allow every *.vercel.app origin.
 The homepage revalidates server-fetched data; interactive filters use bounded API responses.
